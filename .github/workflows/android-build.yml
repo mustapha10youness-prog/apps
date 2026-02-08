@@ -1,0 +1,93 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: '18'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect Android project or Capacitor
+        id: detect
+        run: |
+          if [ -d "android" ]; then
+            echo "has_android=true" >> $GITHUB_OUTPUT
+          elif [ -f "capacitor.config.json" ] || [ -f "capacitor.config.ts" ]; then
+            echo "has_android=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_android=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Prepare Android project (Capacitor)
+        if: steps.detect.outputs.has_android == 'true'
+        run: |
+          # If android/ exists we assume native project present.
+          if [ -d "android" ]; then
+            echo "Native Android project detected."
+          else
+            echo "Capacitor config detected — adding/syncing android project."
+            npm install @capacitor/cli @capacitor/core --no-save
+            npx cap sync android || npx cap add android
+          fi
+
+      - name: Setup Java (for Gradle)
+        if: steps.detect.outputs.has_android == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        if: steps.detect.outputs.has_android == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/gradle-wrapper.properties') }}
+
+      - name: Build Android (assemble release)
+        if: steps.detect.outputs.has_android == 'true'
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Upload built APK/AAB
+        if: steps.detect.outputs.has_android == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-artifacts
+          path: |
+            android/app/build/outputs/**/*.apk
+            android/app/build/outputs/**/*.aab
+
+      - name: Notify when Android not found
+        if: steps.detect.outputs.has_android == 'false'
+        run: |
+          echo "No Android or Capacitor project detected. To build Android you need either an 'android' directory (native Gradle project) or a Capacitor config (capacitor.config.json / .ts)."
+
+# Notes:
+# - For signing an APK/AAB in CI, add these repository secrets:
+#   ANDROID_KEYSTORE_BASE64 (base64 of keystore file), ANDROID_KEYSTORE_PASSWORD,
+#   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+# - You can extend the workflow to decode the base64 keystore and configure
+#   Gradle signingProperties before running ./gradlew assembleRelease.
