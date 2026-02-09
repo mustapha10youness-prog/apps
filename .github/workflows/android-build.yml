@@ -71,16 +71,19 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon
 
+      - name: List build outputs
+        if: steps.detect.outputs.has_android == 'true'
+        run: |
+          find android/app/build/outputs -type f -name "*.apk" -o -name "*.aab" 2>/dev/null || echo "No APK/AAB files found yet"
+          ls -la android/app/build/outputs/ 2>/dev/null || echo "outputs dir not found"
+
       - name: Upload Build Artifact
         if: steps.detect.outputs.has_android == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: my-app-name
-          path: |
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/bundle/release/*.aab
-            android/app/build/outputs/bundle/debug/*.aab
+          path: android/app/build/outputs/
+          if-no-files-found: warn
 
       - name: Notify when Android not found
         if: steps.detect.outputs.has_android == 'false'
